@@ -1,0 +1,123 @@
+# Local stack: admin UI, control-plane Postgres, and (optionally) sample customer databases.
+#
+#   sh scripts/generate-local-secrets.sh      # once: writes .env
+#   docker compose up -d                       # control plane + admin
+#   docker compose --profile testdb up -d      # also start a sample customer Postgres to connect to
+#   docker compose --profile app up -d --build # also build and start api + worker (needs apps/api and apps/worker)
+#
+# Everything listens on 127.0.0.1 only. Nothing here is meant to face a network.
+
+name: sethucms
+
+x-hardening: &hardening
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+  control-plane-db:
+    <<: *hardening
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: sethucms
+      POSTGRES_USER: sethucms
+      POSTGRES_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD:?run sh scripts/generate-local-secrets.sh first}
+    volumes:
+      - control-plane-data:/var/lib/postgresql/data
+    ports: ["127.0.0.1:54320:5432"]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sethucms -d sethucms"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # Postgres needs a few capabilities at start-up to switch to its own user.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+
+  admin:
+    <<: *hardening
+    build:
+      context: ../sethucms-admin
+      dockerfile: ../sethucms-infra/docker/Dockerfile.admin
+      additional_contexts:
+        infra: ./docker
+      args:
+        VITE_API_URL: ${VITE_API_URL:-}
+    ports: ["127.0.0.1:5173:8080"]
+    read_only: true
+    tmpfs: ["/tmp", "/var/cache/nginx", "/var/run"]
+    networks: [frontend]
+
+  # ---- profile "testdb": sample databases to connect the CMS to while developing -------------
+  test-postgres:
+    <<: *hardening
+    profiles: [testdb]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: ${TEST_PG_PASSWORD:?run sh scripts/generate-local-secrets.sh first}
+    volumes:
+      - ./local/test-postgres-init.sql:/docker-entrypoint-initdb.d/01-sample.sql:ro
+      - test-postgres-data:/var/lib/postgresql/data
+    ports: ["127.0.0.1:54321:5432"]
+    networks: [customer-dbs]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+
+  # ---- profile "app": the gateway and worker (these apps are not written yet) -----------------
+  api:
+    <<: *hardening
+    profiles: [app]
+    build:
+      context: ../sethucms
+      dockerfile: ../sethucms-infra/docker/Dockerfile.api
+    environment:
+      DATABASE_URL: postgres://sethucms:${CONTROL_PLANE_DB_PASSWORD}@control-plane-db:5432/sethucms
+      OIDC_ISSUER: ${OIDC_ISSUER}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID}
+      SESSION_SECRET: ${SESSION_SECRET:?run sh scripts/generate-local-secrets.sh first}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      control-plane-db: { condition: service_healthy }
+    ports: ["127.0.0.1:8080:8080"]
+    read_only: true
+    tmpfs: ["/tmp"]
+    # The API never talks to customer databases, so it is NOT on the customer-dbs network.
+    networks: [frontend, backend]
+
+  worker:
+    <<: *hardening
+    profiles: [app]
+    build:
+      context: ../sethucms
+      dockerfile: ../sethucms-infra/docker/Dockerfile.worker
+    environment:
+      DATABASE_URL: postgres://sethucms:${CONTROL_PLANE_DB_PASSWORD}@control-plane-db:5432/sethucms
+      KMS_KEY_REF: ${KMS_KEY_REF}
+      EGRESS_BLOCKLIST_EXTRA: ${EGRESS_BLOCKLIST_EXTRA:-}
+      WORKER_MAX_POOL_PER_CONNECTION: ${WORKER_MAX_POOL_PER_CONNECTION:-5}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    depends_on:
+      control-plane-db: { condition: service_healthy }
+    read_only: true
+    tmpfs: ["/tmp"]
+    # The worker is the only service that reaches customer databases.
+    networks: [backend, customer-dbs]
+
+networks:
+  frontend: {}
+  backend:
+    internal: true   # no route to the internet
+  customer-dbs: {}
+
+volumes:
+  control-plane-data: {}
+  test-postgres-data: {}

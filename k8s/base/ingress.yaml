@@ -1,0 +1,25 @@
+# Needs the ingress-nginx controller. Overlays set the real host name and TLS secret.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sethucms
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 1m          # records are small; large bodies are refused early
+    nginx.ingress.kubernetes.io/limit-rps: "50"              # per client address; the API adds per-user limits on top
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [cms.example.com]
+      secretName: sethucms-tls
+  rules:
+    - host: cms.example.com
+      http:
+        paths:
+          - path: /v1
+            pathType: Prefix
+            backend: { service: { name: api, port: { name: http } } }
+          - path: /
+            pathType: Prefix
+            backend: { service: { name: admin, port: { name: http } } }

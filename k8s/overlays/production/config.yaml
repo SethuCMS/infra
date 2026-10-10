@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sethucms-config
+data:
+  LOG_LEVEL: info
+  OIDC_ISSUER: https://login.example.com/realms/sethucms-production
+  KMS_KEY_REF: arn:aws:kms:eu-west-1:222222222222:alias/sethucms-production-vault
+  QUEUE_URL: https://sqs.eu-west-1.amazonaws.com/222222222222/sethucms-production-jobs

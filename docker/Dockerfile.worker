@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1.7
+# SethuCMS worker (apps/worker): the only component that decrypts connection secrets.
+# Build context: the sethucms repository root.   docker build -f ../sethucms-infra/docker/Dockerfile.worker ../sethucms
+# NOTE: apps/worker is not written yet. This file is ready for when it exists.
+
+FROM node:22-bookworm-slim AS build
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN corepack enable
+WORKDIR /repo
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY packages ./packages
+COPY apps/worker ./apps/worker
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+RUN pnpm --filter @sethucms/worker... build
+RUN pnpm --filter @sethucms/worker deploy --prod /out
+
+FROM gcr.io/distroless/nodejs22-debian12:nonroot AS runtime
+WORKDIR /app
+COPY --from=build --chown=nonroot:nonroot /out ./
+ENV NODE_ENV=production
+EXPOSE 9090
+CMD ["dist/main.js"]

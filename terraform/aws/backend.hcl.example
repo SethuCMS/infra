@@ -1,0 +1,7 @@
+# Create the bucket and lock table once, by hand, before the first "terraform init".
+# The bucket must have versioning and encryption on, and public access blocked.
+bucket         = "your-company-sethucms-terraform-state"
+key            = "staging/terraform.tfstate"   # use a different key per environment
+region         = "eu-west-1"
+encrypt        = true
+dynamodb_table = "sethucms-terraform-locks"    # partition key: LockID (string)

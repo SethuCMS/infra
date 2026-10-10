@@ -1,0 +1,93 @@
+# Network rules: everything is denied unless a rule below allows it.
+# (Needs a network plugin that enforces NetworkPolicy, for example the VPC CNI with network policy enabled, Calico or Cilium.)
+
+# 1. Deny all traffic in and out of every pod in the namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# 2. Everyone may ask the cluster DNS.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# 3. Only the ingress controller may call the API and the admin UI.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [api, admin] }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ingress-nginx }
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# 4. The API reaches the control-plane database and HTTPS services (sign-in provider, queue). It never reaches customer databases.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: api-egress
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: api }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: { cidr: 10.0.0.0/16 }    # overlays set this to the database subnet range
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - ipBlock: { cidr: 10.0.0.0/16 }    # private endpoints for the queue and other cloud services (same range as above)
+      ports:
+        - { protocol: TCP, port: 443 }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16]
+      ports:
+        - { protocol: TCP, port: 443 }
+---
+# 5. The worker reaches the control-plane database, and customer databases anywhere EXCEPT the cloud metadata
+#    address and the cluster's own ranges. (Even if a user tricks the worker into connecting somewhere
+#    unexpected, it cannot reach other pods or steal cloud credentials.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: worker-egress
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: worker }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: { cidr: 10.0.0.0/16 }    # control-plane database (overlays set the real range)
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16    # cloud metadata service
+              - 10.100.0.0/16     # Kubernetes service range (set the real one in the overlay)
+              - 100.64.0.0/10     # pod range used by some clusters (set the real one in the overlay)

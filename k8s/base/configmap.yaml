@@ -1,0 +1,15 @@
+# Settings that are not secret. Secrets live in the "sethucms-secrets" Secret (see ../examples).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sethucms-config
+data:
+  LOG_LEVEL: info
+  OIDC_ISSUER: https://login.example.com/realms/sethucms
+  OIDC_CLIENT_ID: sethucms-admin
+  # A reference to the key in the cloud KMS, not the key itself.
+  KMS_KEY_REF: arn:aws:kms:REGION:ACCOUNT:alias/sethucms-vault
+  QUEUE_URL: https://sqs.REGION.amazonaws.com/ACCOUNT/sethucms-jobs
+  # Extra address ranges the worker must never connect to, comma separated (on top of the built-in blocklist).
+  EGRESS_BLOCKLIST_EXTRA: ""
+  WORKER_MAX_POOL_PER_CONNECTION: "5"

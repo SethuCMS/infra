@@ -1,0 +1,24 @@
+# Copy to terraform.tfvars (which is git-ignored) and adjust.
+region      = "eu-west-1"
+environment = "staging"            # "staging" or "production"
+
+# Staging: small and cheap
+az_count          = 2
+node_instance_types = ["t3.large"]
+node_desired_size = 2
+db_instance_class = "db.t4g.medium"
+db_multi_az       = false
+
+# Production: replace with these
+# az_count              = 3
+# node_instance_types   = ["m6i.large"]
+# node_min_size         = 3
+# node_desired_size     = 3
+# node_max_size         = 10
+# db_instance_class     = "db.m6g.large"
+# db_multi_az           = true
+# deletion_protection   = true
+
+# Reach the Kubernetes API from a VPN or bastion, or allow specific addresses here (never 0.0.0.0/0):
+# cluster_endpoint_public_access = true
+# cluster_public_access_cidrs    = ["203.0.113.10/32"]

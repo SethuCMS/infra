@@ -1,0 +1,65 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sethucms
+resources:
+  - ../../base
+
+# Image tags. Pin by digest (newTag replaced with digest: sha256:...) once images are published.
+images:
+  - { name: ghcr.io/sethucms/api, newTag: 0.0.0 }
+  - { name: ghcr.io/sethucms/worker, newTag: 0.0.0 }
+  - { name: ghcr.io/sethucms/admin, newTag: 0.0.0 }
+
+patches:
+  - path: config.yaml
+  # Production keeps three copies spread over zones and scales further under load.
+  - target: { kind: HorizontalPodAutoscaler, name: api }
+    patch: |-
+      - { op: replace, path: /spec/minReplicas, value: 3 }
+      - { op: replace, path: /spec/maxReplicas, value: 10 }
+  - target: { kind: HorizontalPodAutoscaler, name: worker }
+    patch: |-
+      - { op: replace, path: /spec/minReplicas, value: 3 }
+      - { op: replace, path: /spec/maxReplicas, value: 12 }
+  # Use the safer rule for spreading over zones in production.
+  - target: { kind: Deployment, name: "api|worker" }
+    patch: |-
+      - { op: replace, path: /spec/template/spec/topologySpreadConstraints/0/whenUnsatisfiable, value: DoNotSchedule }
+  # The cloud roles come from terraform output (api_role_arn, worker_role_arn). Placeholders until you apply terraform.
+  - target: { kind: ServiceAccount, name: api }
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value: { eks.amazonaws.com/role-arn: "arn:aws:iam::222222222222:role/sethucms-production-api" }
+  - target: { kind: ServiceAccount, name: worker }
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value: { eks.amazonaws.com/role-arn: "arn:aws:iam::222222222222:role/sethucms-production-worker" }
+  - target: { kind: Ingress, name: sethucms }
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: cms.example.com
+      - op: replace
+        path: /spec/tls/0/hosts/0
+        value: cms.example.com
+  # Address ranges: set these to the values terraform prints (vpc_cidr, database_subnet_cidrs).
+  - target: { kind: NetworkPolicy, name: api-egress }
+    patch: |-
+      - op: replace
+        path: /spec/egress/0/to/0/ipBlock/cidr
+        value: 10.0.0.0/16
+      - op: replace
+        path: /spec/egress/1/to/0/ipBlock/cidr
+        value: 10.0.0.0/16
+  - target: { kind: NetworkPolicy, name: worker-egress }
+    patch: |-
+      - op: replace
+        path: /spec/egress/0/to/0/ipBlock/cidr
+        value: 10.0.0.0/16
+
+replicas:
+  - { name: api, count: 3 }
+  - { name: worker, count: 3 }
+  - { name: admin, count: 2 }

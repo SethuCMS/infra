@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: sethucms
+resources:
+  - namespace.yaml
+  - serviceaccounts.yaml
+  - configmap.yaml
+  - api.yaml
+  - worker.yaml
+  - admin.yaml
+  - ingress.yaml
+  - networkpolicies.yaml
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: sethucms
+    includeSelectors: false
